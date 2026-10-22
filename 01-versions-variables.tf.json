@@ -1,0 +1,132 @@
+
+{
+  "terraform": {
+    "required_version": ">= 1.6.0",
+    "backend": {
+      "s3": {
+        "bucket": "msa-platform-986881030850-ap-northeast-2-tfstate",
+        "key": "aws-infra/terraform.tfstate",
+        "region": "ap-northeast-2",
+        "encrypt": true,
+        "use_lockfile": true
+      }
+    },
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 6.0"
+      },
+      "random": {
+        "source": "hashicorp/random",
+        "version": "~> 3.6"
+      }
+    }
+  },
+  "provider": {
+    "aws": [
+      {
+        "region": "${var.region}",
+        "default_tags": [
+          {
+            "tags": {
+              "Project": "${var.project}",
+              "ManagedBy": "Terraform"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "variable": {
+    "project": {
+      "type": "string",
+      "default": "msa-platform",
+      "description": "Project name used for AWS resource naming and tagging"
+    },
+    "region": {
+      "type": "string",
+      "default": "ap-northeast-2",
+      "description": "AWS region"
+    },
+    "domain_name": {
+      "type": "string",
+      "default": "soladmins.com",
+      "description": "Route53 domain name"
+    },
+    "hosted_zone_id": {
+      "type": "string",
+      "default": "",
+      "description": "Existing Route53 Hosted Zone ID"
+    },
+    "admin_cidrs": {
+      "type": "list(string)",
+      "description": "Administrator public IP CIDR blocks",
+      "validation": [
+        {
+          "condition": "${length(var.admin_cidrs) > 0 && alltrue([for c in var.admin_cidrs : can(cidrhost(c, 0)) && c != \"0.0.0.0/0\"])}",
+          "error_message": "관리자 공인 IP CIDR을 지정하세요. 0.0.0.0/0 금지."
+        }
+      ]
+    },
+    "admin_role_arn": {
+      "type": "string",
+      "description": "IAM principal ARN for EKS administrator access"
+    },
+    "kubernetes_version": {
+      "type": "string",
+      "default": "1.35",
+      "description": "EKS Kubernetes version"
+    },
+    "node_instance_type": {
+      "type": "string",
+      "default": "t3.medium",
+      "description": "EC2 instance type for EKS worker nodes"
+    },
+    "db_instance_class": {
+      "type": "string",
+      "default": "db.t3.small",
+      "description": "RDS instance class"
+    },
+    "redis_node_type": {
+      "type": "string",
+      "default": "cache.t3.micro",
+      "description": "ElastiCache Redis node type"
+    },
+    "multi_az": {
+      "type": "bool",
+      "default": true,
+      "description": "Enable Multi-AZ configuration where supported"
+    },
+    "lb_dns_name": {
+      "type": "string",
+      "default": "",
+      "description": "AWS Load Balancer DNS name"
+    },
+    "lb_zone_id": {
+      "type": "string",
+      "default": "",
+      "description": "AWS Load Balancer Hosted Zone ID"
+    },
+    "frontend_origin": {
+      "type": "string",
+      "default": "https://www.soladmins.com",
+      "description": "Frontend origin used for CORS"
+    },
+    "alert_email": {
+      "type": "string",
+      "description": "Email address used for SNS alert notifications"
+    }
+  },
+  "data": {
+    "aws_caller_identity": {
+      "current": {}
+    },
+    "aws_partition": {
+      "current": {}
+    }
+  },
+  "locals": {
+    "azs": "${[\"${var.region}a\", \"${var.region}c\"]}",
+    "zone_id": "${var.hosted_zone_id != \"\" ? var.hosted_zone_id : aws_route53_zone.main[0].zone_id}"
+  }
+}

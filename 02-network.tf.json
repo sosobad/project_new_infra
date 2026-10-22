@@ -1,0 +1,111 @@
+{
+  "resource": {
+    "aws_vpc": {
+      "main": {
+        "cidr_block": "10.0.0.0/16",
+        "enable_dns_support": true,
+        "enable_dns_hostnames": true,
+        "tags": {
+          "Name": "${var.project}"
+        }
+      }
+    },
+    "aws_internet_gateway": {
+      "main": {
+        "vpc_id": "${aws_vpc.main.id}"
+      }
+    },
+    "aws_subnet": {
+      "public": {
+        "count": 2,
+        "vpc_id": "${aws_vpc.main.id}",
+        "availability_zone": "${local.azs[count.index]}",
+        "cidr_block": "${cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 1)}",
+        "map_public_ip_on_launch": false,
+        "tags": {
+          "Name": "${\"${var.project}-public-${count.index}\"}",
+          "kubernetes.io/role/elb": "1"
+        }
+      },
+      "private": {
+        "count": 2,
+        "vpc_id": "${aws_vpc.main.id}",
+        "availability_zone": "${local.azs[count.index]}",
+        "cidr_block": "${cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 11)}",
+        "map_public_ip_on_launch": false,
+        "tags": {
+          "Name": "${\"${var.project}-private-${count.index}\"}",
+          "kubernetes.io/role/internal-elb": "1"
+        }
+      },
+      "database": {
+        "count": 2,
+        "vpc_id": "${aws_vpc.main.id}",
+        "availability_zone": "${local.azs[count.index]}",
+        "cidr_block": "${cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 21)}",
+        "map_public_ip_on_launch": false,
+        "tags": {
+          "Name": "${\"${var.project}-database-${count.index}\"}"
+        }
+      }
+    },
+    "aws_eip": {
+      "nat": {
+        "count": 2,
+        "domain": "vpc"
+      }
+    },
+    "aws_nat_gateway": {
+      "main": {
+        "count": 2,
+        "allocation_id": "${aws_eip.nat[count.index].id}",
+        "subnet_id": "${aws_subnet.public[count.index].id}",
+        "depends_on": [
+          "aws_internet_gateway.main"
+        ]
+      }
+    },
+    "aws_route_table": {
+      "public": {
+        "vpc_id": "${aws_vpc.main.id}"
+      },
+      "private": {
+        "count": 2,
+        "vpc_id": "${aws_vpc.main.id}"
+      },
+      "database": {
+        "vpc_id": "${aws_vpc.main.id}"
+      }
+    },
+    "aws_route": {
+      "internet": {
+        "route_table_id": "${aws_route_table.public.id}",
+        "destination_cidr_block": "0.0.0.0/0",
+        "gateway_id": "${aws_internet_gateway.main.id}"
+      },
+      "nat": {
+        "count": 2,
+        "route_table_id": "${aws_route_table.private[count.index].id}",
+        "destination_cidr_block": "0.0.0.0/0",
+        "nat_gateway_id": "${aws_nat_gateway.main[count.index].id}"
+      }
+    },
+    "aws_route_table_association": {
+      "public": {
+        "count": 2,
+        "subnet_id": "${aws_subnet.public[count.index].id}",
+        "route_table_id": "${aws_route_table.public.id}"
+      },
+      "private": {
+        "count": 2,
+        "subnet_id": "${aws_subnet.private[count.index].id}",
+        "route_table_id": "${aws_route_table.private[count.index].id}"
+      },
+      "database": {
+        "count": 2,
+        "subnet_id": "${aws_subnet.database[count.index].id}",
+        "route_table_id": "${aws_route_table.database.id}"
+      }
+    }
+  }
+}

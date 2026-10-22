@@ -1,0 +1,35 @@
+﻿alertmanager:
+  serviceAccount:
+    create: true
+    name: monitoring-kube-prometheus-alertmanager
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::986881030850:role/msa-platform-alertmanager-sns
+
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by:
+        - alertname
+        - namespace
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 1h
+      receiver: aws-sns
+
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+
+    receivers:
+      - name: aws-sns
+        sns_configs:
+          - topic_arn: arn:aws:sns:ap-northeast-2:986881030850:msa-platform-alerts
+            sigv4:
+              region: ap-northeast-2
+            subject: "MSA Platform Alert"
+            send_resolved: true
+
+      - name: "null"

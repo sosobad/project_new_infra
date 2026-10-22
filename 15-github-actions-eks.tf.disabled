@@ -1,0 +1,80 @@
+# ============================================================
+# GitHub Actions -> EKS
+# ============================================================
+
+# ------------------------------------------------------------
+# Allow GitHub Actions IAM Role to describe the EKS cluster
+# ------------------------------------------------------------
+
+resource "aws_iam_policy" "github_actions_eks" {
+  name        = "github-actions-msa-platform-eks"
+  description = "Allow GitHub Actions to access the msa-platform EKS cluster"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Action = [
+          "eks:DescribeCluster"
+        ]
+
+        Resource = "aws_eks_cluster.main.arn"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "github-actions-msa-platform-eks"
+  }
+}
+
+
+# ------------------------------------------------------------
+# Attach EKS policy to GitHub Actions Role
+# ------------------------------------------------------------
+
+resource "aws_iam_role_policy_attachment" "github_actions_eks" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.github_actions_eks.arn
+}
+
+
+# ------------------------------------------------------------
+# Register GitHub Actions Role in EKS Access Entries
+# ------------------------------------------------------------
+
+resource "aws_eks_access_entry" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.github_actions.arn
+
+  type = "STANDARD"
+
+  tags = {
+    Name = "github-actions-msa-platform"
+  }
+}
+
+
+# ------------------------------------------------------------
+# Give GitHub Actions Kubernetes edit permissions
+# Only for the "msa" namespace
+# ------------------------------------------------------------
+
+resource "aws_eks_access_policy_association" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.github_actions.arn
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+
+  access_scope {
+    type       = "namespace"
+    namespaces = ["msa"]
+  }
+
+  depends_on = [
+    aws_eks_access_entry.github_actions
+  ]
+}

@@ -1,0 +1,237 @@
+
+# ============================================================
+# GitHub Actions OIDC Provider
+# 기존 Provider 재사용
+# ============================================================
+
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+
+# ============================================================
+# GitHub Actions IAM Role
+#
+# Repository:
+# sosobad/project_new_infra
+#
+# Branch:
+# main
+# ============================================================
+
+resource "aws_iam_role" "github_actions" {
+  name = "github-actions-project-new-infra"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Federated = data.aws_iam_openid_connect_provider.github.arn
+        }
+
+        Action = "sts:AssumeRoleWithWebIdentity"
+
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+
+            "token.actions.githubusercontent.com:sub" = "repo:sosobad/project_new_infra:ref:refs/heads/main"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "github-actions-project-new-infra"
+    Project = "project_new_infra"
+  }
+}
+
+
+# ============================================================
+# GitHub Actions -> ECR Push Policy
+# 기존 MSA ECR 저장소 사용
+# ============================================================
+
+resource "aws_iam_policy" "github_actions_ecr" {
+  name        = "github-actions-project-new-infra-ecr"
+  description = "Allow GitHub Actions to push MSA images to ECR"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid      = "ECRLogin"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "PushPullImages"
+        Effect = "Allow"
+
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+
+        Resource = [
+          "arn:aws:ecr:ap-northeast-2:986881030850:repository/api-gateway",
+          "arn:aws:ecr:ap-northeast-2:986881030850:repository/member-service",
+          "arn:aws:ecr:ap-northeast-2:986881030850:repository/product-service",
+          "arn:aws:ecr:ap-northeast-2:986881030850:repository/order-service",
+          "arn:aws:ecr:ap-northeast-2:986881030850:repository/frontend"
+        ]
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "github-actions-project-new-infra-ecr"
+    Project = "project_new_infra"
+  }
+}
+
+
+resource "aws_iam_role_policy_attachment" "github_actions_ecr" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.github_actions_ecr.arn
+}
+
+
+# ============================================================
+# GitHub Actions -> Terraform ReadOnly
+# Terraform plan/refresh에 필요한 읽기 권한
+# ============================================================
+
+resource "aws_iam_role_policy_attachment" "github_actions_readonly" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+
+# ============================================================
+# GitHub Actions -> Terraform S3 State Access
+#
+# 기존 버킷을 사용하되 새 프로젝트의 state key 분리
+# 기존 aws-infra/terraform.tfstate와 공유하지 않음
+# ============================================================
+
+resource "aws_iam_policy" "github_actions_tfstate" {
+  name        = "github-actions-project-new-infra-tfstate"
+  description = "Allow GitHub Actions to access project_new_infra Terraform state"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "ListTerraformStateBucket"
+        Effect = "Allow"
+
+        Action = [
+          "s3:ListBucket"
+        ]
+
+        Resource = "arn:aws:s3:::msa-platform-986881030850-ap-northeast-2-tfstate"
+
+        Condition = {
+          StringLike = {
+            "s3:prefix" = [
+              "project_new_infra/*"
+            ]
+          }
+        }
+      },
+      {
+        Sid    = "AccessTerraformState"
+        Effect = "Allow"
+
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+
+        Resource = [
+          "arn:aws:s3:::msa-platform-986881030850-ap-northeast-2-tfstate/project_new_infra/terraform.tfstate",
+          "arn:aws:s3:::msa-platform-986881030850-ap-northeast-2-tfstate/project_new_infra/terraform.tfstate.tflock"
+        ]
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "github-actions-project-new-infra-tfstate"
+    Project = "project_new_infra"
+  }
+}
+
+
+resource "aws_iam_role_policy_attachment" "github_actions_tfstate" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.github_actions_tfstate.arn
+}
+
+
+# ============================================================
+# GitHub Actions -> Redis Secret Read Access
+# 기존 MSA Redis Secret을 읽어야 할 때 사용
+# ============================================================
+
+resource "aws_iam_policy" "github_actions_secrets_read" {
+  name        = "github-actions-project-new-infra-secrets-read"
+  description = "Allow GitHub Actions Terraform CI to read the existing MSA Redis secret"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "ReadRedisSecret"
+        Effect = "Allow"
+
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+
+        Resource = [
+          "arn:aws:secretsmanager:ap-northeast-2:986881030850:secret:msa-platform/redis-*"
+        ]
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "github-actions-project-new-infra-secrets-read"
+    Project = "project_new_infra"
+  }
+}
+
+
+resource "aws_iam_role_policy_attachment" "github_actions_secrets_read" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.github_actions_secrets_read.arn
+}
+
+
+# ============================================================
+# Output
+# ============================================================
+
+output "github_actions_role_arn" {
+  description = "IAM Role ARN for project_new_infra GitHub Actions OIDC"
+  value       = aws_iam_role.github_actions.arn
+}
